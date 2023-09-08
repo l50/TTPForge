@@ -20,28 +20,43 @@ THE SOFTWARE.
 package art_test
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/facebookincubator/ttpforge/pkg/art"
 )
 
 func TestNewConfig(t *testing.T) {
+	// This test assumes you have an actual YAML file. If you don't, this will fail.
 	tests := []struct {
-		name   string
-		path   string
-		expect *art.Config
-		err    error
+		name     string
+		input    string
+		expected art.Config
+		hasError bool
 	}{
-		// TODO: Add test cases here
+		{
+			name:     "Valid path",
+			input:    "path_to_valid_yaml.yaml",
+			expected: art.Config{ArtPath: "some_path", CtiPath: "another_path"},
+			hasError: false,
+		},
+		{
+			name:     "Invalid path",
+			input:    "invalid_path.yaml",
+			expected: art.Config{},
+			hasError: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// cfg, err := art.NewConfig(tc.path)
-			// if err != tc.err {
-			// 	t.Errorf("Expected error %v, but got %v", tc.err, err)
-			// }
-			// Add more assertions
+			cfg, err := art.NewConfig(tc.input)
+			if (err != nil) != tc.hasError {
+				t.Fatalf("expected error status %v; got %v", tc.hasError, (err != nil))
+			}
+			if *cfg != tc.expected {
+				t.Fatalf("expected config %v; got %v", tc.expected, cfg)
+			}
 		})
 	}
 }
@@ -75,13 +90,23 @@ func TestNewAbility(t *testing.T) {
 		command  string
 		expected *art.Ability
 	}{
-		// TODO: Add test cases here
+		{
+			name:    "base64 encoding",
+			id:      1,
+			command: "ls",
+			expected: &art.Ability{
+				AbilityID: 1,
+				Command:   base64.StdEncoding.EncodeToString([]byte("ls")),
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// actual := art.NewAbility(tc.id, tc.command)
-			// Assertions, e.g., compare actual and expected Ability
+			ab := art.NewAbility(tc.id, tc.command)
+			if *ab != *tc.expected {
+				t.Fatalf("expected %v; got %v", tc.expected, ab)
+			}
 		})
 	}
 }
@@ -90,17 +115,29 @@ func TestNewVar(t *testing.T) {
 	tests := []struct {
 		name     string
 		id       int64
-		nameVar  string
+		varName  string
 		value    string
 		expected *art.Var
 	}{
-		// TODO: Add test cases here
+		{
+			name:    "base64 encoding",
+			id:      1,
+			varName: "VAR1",
+			value:   "value1",
+			expected: &art.Var{
+				AbilityID: 1,
+				VarName:   "VAR1",
+				Value:     base64.StdEncoding.EncodeToString([]byte("value1")),
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// actual := art.NewVar(tc.id, tc.nameVar, tc.value)
-			// Assertions, e.g., compare actual and expected Var
+			v := art.NewVar(tc.id, tc.varName, tc.value)
+			if *v != *tc.expected {
+				t.Fatalf("expected %v; got %v", tc.expected, v)
+			}
 		})
 	}
 }

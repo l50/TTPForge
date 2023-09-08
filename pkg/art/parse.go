@@ -145,53 +145,40 @@ type InputArg struct {
 	Default string `yaml:"default"`
 }
 
-// LoadArtYAML loads the ART YAML from a given path into the Atomic structure.
+// Helper function to process character replacements
+func replaceSpecialChars(str string) string {
+	// Replacing "\x07" with "a" for specific reasons (you can elaborate based on real reasons).
+	str = strings.ReplaceAll(str, "\x07", "a")
+	// Replacing "\\\\" with "\\" to correct potential escape sequence errors.
+	str = strings.ReplaceAll(str, "\\\\", "\\")
+	return str
+}
+
+// ProcessAtomicTest processes an individual Atomic Test from the
+// provided AtomicTest structure, filters supported platforms, and
+// creates abilities and variables from the atomic test.
 //
 // **Parameters:**
 //
-// path: Path to the ART YAML file.
-//
-// **Returns:**
-//
-// error: An error if any issue occurs while loading the ART YAML.
-func (a *Atomic) LoadArtYAML(path string) error {
-	yamlFile, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
+// atomicTest: The AtomicTest structure containing details of
+// the test like supported platforms, executor commands, etc.
+func (a *Atomic) ProcessAtomicTest(atomicTest AtomicTest) {
+	for _, platform := range atomicTest.SupportedPlatforms {
+		platform = strings.ToLower(platform)
+		if platform != "windows" && platform != "linux" && platform != "macos" {
+			continue
+		}
+		command := replaceSpecialChars(atomicTest.Executor.Command)
 
-	ArtYAML := &AtomicRedTeamYAML{}
-	err = yaml.Unmarshal(yamlFile, ArtYAML)
-	if err != nil {
-		return err
-	}
+		artAbility := NewAbility(a.AbilityID, command)
+		a.ArtAbilities = append(a.ArtAbilities, artAbility)
 
-	// Process atomic tests in the yaml
-	for _, atomicTest := range ArtYAML.AtomicTests {
-		// Add logic here to process each atomic test and convert it to an Ability and Vars
-		// For example:
-		for _, platform := range atomicTest.SupportedPlatforms {
-			platform = strings.ToLower(platform)
-			if platform != "windows" && platform != "linux" && platform != "macos" {
-				continue
-			}
-			command := atomicTest.Executor.Command
-			command = strings.ReplaceAll(command, "\x07", "a")
-			command = strings.ReplaceAll(command, "\\\\", "\\")
-
-			artAbility := NewAbility(a.AbilityID, command)
-			a.ArtAbilities = append(a.ArtAbilities, artAbility)
-			for varName, varVal := range atomicTest.InputArguments {
-				value := varVal.Default
-				value = strings.ReplaceAll(value, "\x07", "a")
-				value = strings.ReplaceAll(value, "\\\\", "\\")
-				artVar := NewVar(a.AbilityID, varName, value)
-				a.ArtInputVars = append(a.ArtInputVars, artVar)
-			}
+		for varName, varVal := range atomicTest.InputArguments {
+			value := replaceSpecialChars(varVal.Default)
+			artVar := NewVar(a.AbilityID, varName, value)
+			a.ArtInputVars = append(a.ArtInputVars, artVar)
 		}
 	}
-
-	return nil
 }
 
 // NewConfig initializes a new Config.
@@ -206,14 +193,14 @@ func (a *Atomic) LoadArtYAML(path string) error {
 // error: An error if any issue occurs while initializing the Config.
 func NewConfig(path string) (*Config, error) {
 	cfg := &Config{}
-	err := cfg.Load(path)
+	err := cfg.LoadArtYAML(path)
 	if err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
-// Load reads a YAML file and loads it into the Config structure.
+// LoadArtYAML reads an ART YAML file and loads it into the Config structure.
 //
 // **Parameters:**
 //
@@ -222,7 +209,7 @@ func NewConfig(path string) (*Config, error) {
 // **Returns:**
 //
 // error: An error if any issue occurs while loading the YAML into Config.
-func (c *Config) Load(path string) error {
+func (c *Config) LoadArtYAML(path string) error {
 	yamlFile, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -337,9 +324,7 @@ func (a *Atomic) LoadAtomic(path string) error {
 // a: A pointer to the Atomic structure.
 func (a *Atomic) GenerateArtVarsAndAbilities() {
 	for varName, varVal := range a.InputArguments {
-		value := varVal.Default
-		value = strings.ReplaceAll(value, "\x07", "a")
-		value = strings.ReplaceAll(value, "\\\\", "\\")
+		value := replaceSpecialChars(varVal.Default)
 		artVar := NewVar(a.AbilityID, varName, value)
 		a.ArtInputVars = append(a.ArtInputVars, artVar)
 	}
