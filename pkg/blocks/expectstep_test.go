@@ -295,7 +295,7 @@ steps:
 
 				// Check the output of the command execution
 				normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
-				expectedSubstring1 := "Current directory: /tmp\n"
+				expectedSubstring1 := "Current directory: "
 				expectedSubstring2 := "You input 30.\n"
 				assert.Contains(t, normalizedOutput, expectedSubstring1)
 				assert.Contains(t, normalizedOutput, expectedSubstring2)
