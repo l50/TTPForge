@@ -1,0 +1,33 @@
+---
+api_version: 2.0
+uuid: 891a38dc-4b2f-4614-9960-a66a7e9499ab
+name: Expect step with SSH password
+description: |
+  This TTP demonstrates the usage of an expect step to automate interaction
+  with an SSH server using a password.
+args:
+  - name: ssh_host
+    description: The hostname or IP address of the SSH server
+    default: k8s6
+  - name: ssh_user
+    description: The username to use for the SSH connection
+    default: bobbo
+  - name: ssh_password
+    description: The password to use for the SSH connection
+    default: "Password123!"
+requirements:
+  platforms:
+    - os: darwin
+    - os: windows
+    - os: linux
+steps:
+  - name: run_expect_script
+    expect:
+      executor: bash
+      inline: |
+        sshpass -p "{{ .Args.ssh_password }}" ssh {{ .Args.ssh_user }}@{{ .Args.ssh_host }}
+      responses:
+        - prompt: "Welcome to Ubuntu"
+          response: "whoami"
+        - prompt: "{{ .Args.ssh_user }}"
+          response: "exit"

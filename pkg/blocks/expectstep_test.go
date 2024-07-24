@@ -20,9 +20,11 @@ THE SOFTWARE.
 package blocks
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -87,7 +89,399 @@ func NewTestTTPExecutionContext(workDir string) TTPExecutionContext {
 	}
 }
 
-func TestExpectStep(t *testing.T) {
+// func TestExpectStep(t *testing.T) {
+// 	t.Parallel()
+// 	testCases := []struct {
+// 		name               string
+// 		script             string
+// 		content            string
+// 		wantUnmarshalError bool
+// 		wantValidateError  bool
+// 		wantExecuteError   bool
+// 		expectedErrTxt     string
+// 	}{
+// 		{
+// 			name: "Test Unmarshal Expect Valid",
+// 			script: `
+// print("Enter your name:")
+// name = input()
+// print(f"Hello, {name}!")
+// print("Enter your age:")
+// age = input()
+// print(f"You are {age} years old.")
+// `,
+// 			content: `
+// steps:
+//   - name: run_expect_script
+//     description: "Run an expect script to interact with the command."
+//     expect:
+//       inline: |
+//         python3 interactive.py
+//       responses:
+//         - prompt: "Enter your name:"
+//           response: "John"
+//         - prompt: "Enter your age:"
+//           response: "30"
+// `,
+// 		},
+// 		{
+// 			name: "Test Unmarshal Expect No Inline",
+// 			script: `
+// print("Enter your name:")
+// name = input()
+// print(f"Hello, {name}!")
+// print("Enter your age:")
+// age = input()
+// print(f"You are {age} years old.")
+// `,
+// 			content: `
+// steps:
+//   - name: run_expect_script
+//     description: "Run an expect script to interact with the command."
+//     expect:
+//       responses:
+//         - prompt: "Enter your name:"
+//           response: "John"
+//         - prompt: "Enter your age:"
+//           response: "30"
+// `,
+// 			wantValidateError: true,
+// 			expectedErrTxt:    "inline must be provided",
+// 		},
+// 		{
+// 			name: "Test ExpectStep Execute With Output",
+// 			script: `
+// print("Enter your name:")
+// name = input()
+// print(f"Hello, {name}!")
+// print("Enter your age:")
+// age = input()
+// print(f"You are {age} years old.")
+// `,
+// 			content: `
+// steps:
+//   - name: run_expect_script
+//     description: "Run an expect script to interact with the command."
+//     expect:
+//       inline: |
+//         python3 interactive.py
+//       responses:
+//         - prompt: "Enter your name:"
+//           response: "John"
+//         - prompt: "Enter your age:"
+//           response: "30"
+// `,
+// 		},
+// 		{
+// 			name: "Test ExpectStep with Chdir",
+// 			script: `
+// import os
+// print("Current directory:", os.getcwd())
+// print("Enter a number:")
+// number = input()
+// print(f"You input {number}.")
+// `,
+// 			content: `
+// steps:
+//   - name: run_expect_script
+//     description: "Run an expect script to interact with the command."
+//     expect:
+//       chdir: "/tmp"
+//       inline: |
+//         python3 interactive.py
+//       responses:
+//         - prompt: "Enter a number:"
+//           response: "30"
+// `,
+// 		},
+// 		{
+// 			name: "Test ExpectStep with CleanupStep",
+// 			script: `
+// print("Enter your name:")
+// name = input()
+// print(f"Hello, {name}!")
+// print("Enter your age:")
+// age = input()
+// print(f"You are {age} years old.")
+// `,
+// 			content: `
+// steps:
+//   - name: run_expect_script
+//     description: "Run an expect script to interact with the command."
+//     expect:
+//       chdir: "/tmp"
+//       inline: |
+//         python3 interactive.py
+//       responses:
+//         - prompt: "Enter your name:"
+//           response: "John"
+//         - prompt: "Enter your age:"
+//           response: "30"
+//       cleanup: |
+//         pwd
+//         cat interactive.py
+//         rm interactive.py
+// `,
+// 		},
+// 	}
+
+// 	for _, tc := range testCases {
+// 		tc := tc
+// 		t.Run(tc.name, func(t *testing.T) {
+// 			t.Parallel()
+// 			scriptPath, tempDir := createTestScript(t, tc.script)
+
+// 			var steps struct {
+// 				Steps []struct {
+// 					Name        string      `yaml:"name"`
+// 					Description string      `yaml:"description"`
+// 					Expect      *ExpectStep `yaml:"expect"`
+// 				} `yaml:"steps"`
+// 			}
+
+// 			err := yaml.Unmarshal([]byte(tc.content), &steps)
+// 			if tc.wantUnmarshalError {
+// 				assert.Error(t, err)
+// 				return
+// 			}
+// 			require.NoError(t, err)
+
+// 			if len(steps.Steps) == 0 || steps.Steps[0].Expect == nil {
+// 				assert.Fail(t, "Failed to unmarshal test case content")
+// 				return
+// 			}
+
+// 			expectStep := steps.Steps[0].Expect
+
+// 			err = expectStep.Validate(NewTestTTPExecutionContext(tempDir))
+// 			if tc.wantValidateError {
+// 				assert.Equal(t, tc.expectedErrTxt, err.Error())
+// 				return
+// 			}
+// 			require.NoError(t, err)
+
+// 			execCtx := NewTestTTPExecutionContext(tempDir)
+// 			console, err := expect.NewConsole(expect.WithStdout(os.Stdout), expect.WithStdin(os.Stdin))
+// 			require.NoError(t, err)
+// 			defer console.Close()
+
+// 			cmd := exec.Command("sh", "-c", "python3 "+scriptPath)
+// 			cmd.Stdin = console.Tty()
+// 			cmd.Stdout = console.Tty()
+// 			cmd.Stderr = console.Tty()
+
+// 			if expectStep.Chdir != "" {
+// 				cmd.Dir = expectStep.Chdir
+// 			}
+
+// 			err = cmd.Start()
+// 			require.NoError(t, err)
+
+// 			done := make(chan struct{})
+
+// 			go func() {
+// 				defer close(done)
+// 				for _, response := range expectStep.Expect.Responses {
+// 					re := regexp.MustCompile(response.Prompt)
+// 					_, err := console.Expect(expect.Regexp(re), expect.WithTimeout(60*time.Second))
+// 					if err != nil {
+// 						t.Errorf("failed to expect %q: %v", re, err)
+// 						return
+// 					}
+// 					_, err = console.SendLine(response.Response)
+// 					if err != nil {
+// 						t.Errorf("failed to send response: %v", err)
+// 						return
+// 					}
+// 				}
+// 				console.Tty().Close()
+// 			}()
+
+// 			_, err = expectStep.Execute(execCtx)
+// 			if tc.wantExecuteError {
+// 				assert.Error(t, err)
+// 				assert.Contains(t, err.Error(), tc.expectedErrTxt)
+// 				return
+// 			}
+// 			require.NoError(t, err)
+
+// 			<-done
+
+// 			output, err := console.ExpectEOF()
+// 			require.NoError(t, err)
+
+// 			normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
+
+// 			if tc.name == "Test ExpectStep with Chdir" {
+// 				assert.Contains(t, normalizedOutput, "Current directory: ")
+// 				assert.Contains(t, normalizedOutput, "You input 30.\n")
+// 			}
+
+// 			if tc.name == "Test ExpectStep with CleanupStep" {
+// 				assert.Contains(t, normalizedOutput, "Hello, John!\n")
+// 				assert.Contains(t, normalizedOutput, "You are 30 years old.\n")
+
+// 				result, err := expectStep.Cleanup(execCtx)
+// 				require.NoError(t, err)
+// 				assert.NotNil(t, result)
+// 			}
+// 		})
+// 	}
+// }
+
+// func TestYamlUnmarshal(t *testing.T) {
+// 	yamlConfig := `
+// steps:
+//   - name: run_expect_script
+//     expect:
+//       inline: |
+//         echo "Hello"
+//       responses:
+//         - prompt: "Enter your name: "
+//           response: "John"
+// `
+
+// 	var config struct {
+// 		Steps []struct {
+// 			Name   string      `yaml:"name"`
+// 			Expect *ExpectStep `yaml:"expect"`
+// 		} `yaml:"steps"`
+// 	}
+
+// 	err := yaml.Unmarshal([]byte(yamlConfig), &config)
+// 	require.NoError(t, err)
+// 	require.Len(t, config.Steps, 1)
+// 	require.NotNil(t, config.Steps[0].Expect)
+
+// 	t.Logf("Unmarshaled config: %+v", config)
+// }
+
+func TestExpectStepSSH(t *testing.T) {
+	t.Parallel()
+	password := "Password123!"
+
+	// Bash script to simulate SSH login
+	script := fmt.Sprintf(`#!/bin/bash
+echo -n "bobbo@k8s6's password: "
+read -r pwd
+if [ "$pwd" == "%s" ]; then
+    while true; do
+        echo -n "bobbo@k8s6:~$ "
+        read -r cmd
+        if [ "$cmd" == "whoami" ]; then
+            echo "bobbo"
+            exit 0
+        else
+            echo "Unknown command"
+        fi
+    done
+else
+    echo "Authentication failed."
+    exit 1
+fi
+`, password)
+
+	scriptPath, tempDir := createTestScript(t, script)
+	defer os.RemoveAll(tempDir)
+
+	// Make the script executable
+	err := os.Chmod(scriptPath, 0755)
+	require.NoError(t, err)
+
+	yamlConfig := fmt.Sprintf(`
+steps:
+  - name: run_expect_script
+    expect:
+      inline: |
+        sh %s
+      responses:
+        - prompt: "bobbo@k8s6's password: "
+          response: "%s"
+        - prompt: "bobbo@k8s6:~$ "
+          response: "whoami"
+`, scriptPath, password)
+
+	var config struct {
+		Steps []struct {
+			Name   string      `yaml:"name"`
+			Expect *ExpectStep `yaml:"expect"`
+		} `yaml:"steps"`
+	}
+
+	err = yaml.Unmarshal([]byte(yamlConfig), &config)
+	require.NoError(t, err)
+	require.Len(t, config.Steps, 1)
+	require.NotNil(t, config.Steps[0].Expect)
+
+	expectStep := config.Steps[0].Expect
+
+	// Add debug information
+	t.Logf("ExpectStep: %+v", expectStep)
+
+	execCtx := NewTestTTPExecutionContext(tempDir)
+
+	err = expectStep.Validate(execCtx)
+	require.NoError(t, err)
+
+	console, err := expect.NewConsole(expectNoError(t), sendNoError(t), expect.WithStdout(os.Stdout), expect.WithStdin(os.Stdin))
+	require.NoError(t, err)
+	defer console.Close()
+
+	cmd := exec.Command("sh", scriptPath)
+	cmd.Stdin = console.Tty()
+	cmd.Stdout = console.Tty()
+	cmd.Stderr = console.Tty()
+
+	err = cmd.Start()
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		for _, response := range expectStep.Expect.Responses {
+			t.Logf("Expecting prompt: %s", response.Prompt)
+			re := regexp.MustCompile(response.Prompt)
+			matchedText, err := console.Expect(expect.Regexp(re))
+			if err != nil {
+				done <- fmt.Errorf("failed to expect %q: %w", re, err)
+				return
+			}
+			t.Logf("Matched text: %s", matchedText)
+			t.Logf("Sending response: %s", response.Response)
+			_, err = console.SendLine(response.Response)
+			if err != nil {
+				done <- fmt.Errorf("failed to send response: %w", err)
+				return
+			}
+		}
+		console.Tty().Close() // Ensure TTY is closed to signal EOF
+		done <- nil
+	}()
+
+	timeout := 30 * time.Second
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("error in expect: %v", err)
+		}
+	case <-time.After(timeout):
+		t.Fatalf("timeout waiting for expect")
+	}
+
+	err = cmd.Wait()
+	require.NoError(t, err)
+
+	output, err := console.ExpectEOF()
+	require.NoError(t, err)
+
+	normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
+	expectedSubstring := "bobbo\n"
+
+	t.Logf("Full output: %s", normalizedOutput)
+	assert.Contains(t, normalizedOutput, expectedSubstring)
+}
+
+func TestExpectStepy(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		name               string
@@ -144,7 +538,7 @@ steps:
           response: "30"
 `,
 			wantValidateError: true,
-			expectedErrTxt:    "inline must be provided",
+			expectedErrTxt:    "expect block must be provided",
 		},
 		{
 			name: "Test ExpectStep Execute With Output",
@@ -161,55 +555,9 @@ steps:
   - name: run_expect_script
     description: "Run an expect script to interact with the command."
     expect:
-      inline: |
-        python3 interactive.py
-      responses:
-        - prompt: "Enter your name:"
-          response: "John"
-        - prompt: "Enter your age:"
-          response: "30"
-`,
-		},
-		{
-			name: "Test ExpectStep with Chdir",
-			script: `
-import os
-print("Current directory:", os.getcwd())
-print("Enter a number:")
-number = input()
-print(f"You input {number}.")
-`,
-			content: `
-steps:
-  - name: run_expect_script
-    description: "Run an expect script to interact with the command."
-    expect:
       chdir: "/tmp"
       inline: |
         python3 interactive.py
-      responses:
-        - prompt: "Enter a number:"
-          response: "30"
-`,
-		},
-		{
-			name: "Test ExpectStep with CleanupStep",
-			script: `
-print("Enter your name:")
-name = input()
-print(f"Hello, {name}!")
-print("Enter your age:")
-age = input()
-print(f"You are {age} years old.")
-`,
-			content: `
-steps:
-  - name: run_expect_script
-    description: "Run an expect script to interact with the command."
-    expect:
-      inline: |
-        python3 interactive.py
-      chdir: "/tmp"
       responses:
         - prompt: "Enter your name:"
           response: "John"
@@ -224,7 +572,9 @@ steps:
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			scriptPath, tempDir := createTestScript(t, tc.script)
 
 			var steps struct {
@@ -256,102 +606,130 @@ steps:
 			}
 			require.NoError(t, err)
 
-			if tc.name == "Test ExpectStep with Chdir" {
-				// Mock the command execution
-				execCtx := NewTestTTPExecutionContext(tempDir)
-				console, err := expect.NewConsole(expectNoError(t), sendNoError(t), expect.WithStdout(os.Stdout), expect.WithStdin(os.Stdin))
-				require.NoError(t, err)
-				defer console.Close()
+			execCtx := NewTestTTPExecutionContext(tempDir)
+			console, err := expect.NewConsole(expect.WithStdout(os.Stdout), expect.WithStdin(os.Stdin))
+			require.NoError(t, err)
+			defer console.Close()
 
-				cmd := exec.Command("sh", "-c", "python3 "+scriptPath)
-				cmd.Stdin = console.Tty()
-				cmd.Stdout = console.Tty()
-				cmd.Stderr = console.Tty()
+			cmd := exec.Command("sh", "-c", "python3 "+scriptPath)
+			cmd.Stdin = console.Tty()
+			cmd.Stdout = console.Tty()
+			cmd.Stderr = console.Tty()
 
-				if expectStep.Chdir != "" {
-					cmd.Dir = expectStep.Chdir
-				}
-
-				err = cmd.Start()
-				require.NoError(t, err)
-
-				done := make(chan struct{})
-
-				// simulate console input
-				go func() {
-					defer close(done)
-					time.Sleep(1 * time.Second)
-					console.SendLine("30")
-					time.Sleep(1 * time.Second)
-					console.Tty().Close() // Close the TTY to signal EOF
-				}()
-
-				_, err = expectStep.Execute(execCtx)
-				require.NoError(t, err)
-				<-done
-
-				output, err := console.ExpectEOF()
-				require.NoError(t, err)
-
-				// Check the output of the command execution
-				normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
-				expectedSubstring1 := "Current directory: "
-				expectedSubstring2 := "You input 30.\n"
-				assert.Contains(t, normalizedOutput, expectedSubstring1)
-				assert.Contains(t, normalizedOutput, expectedSubstring2)
+			if expectStep.Chdir != "" {
+				cmd.Dir = expectStep.Chdir
 			}
 
-			if tc.name == "Test ExpectStep with CleanupStep" {
-				// Mock the command execution
-				execCtx := NewTestTTPExecutionContext(tempDir)
-				console, err := expect.NewConsole(expectNoError(t), sendNoError(t), expect.WithStdout(os.Stdout), expect.WithStdin(os.Stdin))
-				require.NoError(t, err)
-				defer console.Close()
+			err = cmd.Start()
+			require.NoError(t, err)
 
-				cmd := exec.Command("sh", "-c", "python3 "+scriptPath)
-				cmd.Stdin = console.Tty()
-				cmd.Stdout = console.Tty()
-				cmd.Stderr = console.Tty()
+			done := make(chan struct{})
 
-				if expectStep.Chdir != "" {
-					cmd.Dir = expectStep.Chdir
+			go func() {
+				defer close(done)
+				for _, response := range expectStep.Expect.Responses {
+					re := regexp.MustCompile(response.Prompt)
+					_, err := console.Expect(expect.Regexp(re), expect.WithTimeout(60*time.Second))
+					if err != nil {
+						t.Errorf("failed to expect %q: %v", re, err)
+						return
+					}
+					_, err = console.SendLine(response.Response)
+					if err != nil {
+						t.Errorf("failed to send response: %v", err)
+						return
+					}
 				}
+				console.Tty().Close()
+			}()
 
-				err = cmd.Start()
-				require.NoError(t, err)
+			_, err = expectStep.Execute(execCtx)
+			if tc.wantExecuteError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrTxt)
+				return
+			}
+			require.NoError(t, err)
 
-				done := make(chan struct{})
+			<-done
 
-				// simulate console input
-				go func() {
-					defer close(done)
-					time.Sleep(1 * time.Second)
-					console.SendLine("John")
-					time.Sleep(1 * time.Second)
-					console.SendLine("30")
-					time.Sleep(1 * time.Second)
-					console.Tty().Close() // Close the TTY to signal EOF
-				}()
+			output, err := console.ExpectEOF()
+			require.NoError(t, err)
 
-				_, err = expectStep.Execute(execCtx)
-				require.NoError(t, err)
-				<-done
+			normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
 
-				output, err := console.ExpectEOF()
-				require.NoError(t, err)
+			if tc.name == "Test ExpectStep Execute With Output" {
+				assert.Contains(t, normalizedOutput, "Hello, John!\n")
+				assert.Contains(t, normalizedOutput, "You are 30 years old.\n")
 
-				// Check the output of the command execution
-				normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
-				expectedSubstring1 := "Hello, John!\n"
-				expectedSubstring2 := "You are 30 years old.\n"
-				assert.Contains(t, normalizedOutput, expectedSubstring1)
-				assert.Contains(t, normalizedOutput, expectedSubstring2)
-
-				// Execute cleanup step
 				result, err := expectStep.Cleanup(execCtx)
 				require.NoError(t, err)
 				assert.NotNil(t, result)
 			}
+		})
+	}
+}
+
+func TestExpectStepr(t *testing.T) {
+	// Ensure sshpass is in the PATH
+	path := os.Getenv("PATH")
+	sshpassPath := "/opt/homebrew/bin"
+	os.Setenv("PATH", sshpassPath+":"+path)
+
+	tests := []struct {
+		name    string
+		step    *ExpectStep
+		wantErr bool
+	}{
+		{
+			name: "Test_Unmarshal_Expect_Valid",
+			step: &ExpectStep{
+				Expect: &ExpectSpec{
+					Inline: "echo 'hello world'",
+					Responses: []Response{
+						{Prompt: "hello", Response: "world"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Test_Unmarshal_Expect_No_Inline",
+			step: &ExpectStep{
+				Expect: &ExpectSpec{
+					Responses: []Response{
+						{Prompt: "hello", Response: "world"},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Test_ExpectStep_Execute_With_Output",
+			step: &ExpectStep{
+				Executor: "bash",
+				Expect: &ExpectSpec{
+					Inline: `
+					sshpass -p Password123! ssh bobbo@k8s6`,
+					Responses: []Response{
+						{Prompt: "Welcome to Ubuntu", Response: "whoami"},
+						{Prompt: "bobbo", Response: "exit"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			execCtx := TTPExecutionContext{WorkDir: "."}
+			fmt.Println("Executing command:", tt.step.Expect.Inline)
+			_, err := tt.step.Execute(execCtx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Execute() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			fmt.Println("Command execution complete")
 		})
 	}
 }
