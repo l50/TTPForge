@@ -23,7 +23,6 @@ requirements:
 steps:
   - name: run_expect_script
     expect:
-      executor: bash
       inline: |
         sshpass -p "{{ .Args.ssh_password }}" ssh {{ .Args.ssh_user }}@{{ .Args.ssh_host }}
       responses:
