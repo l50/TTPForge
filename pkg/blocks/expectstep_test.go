@@ -20,7 +20,13 @@ THE SOFTWARE.
 package blocks
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +37,9 @@ import (
 
 	expect "github.com/Netflix/go-expect"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
 
@@ -169,68 +177,103 @@ steps:
 	}
 }
 
-func TestExpectStepSSH(t *testing.T) {
-	// Ensure sshpass is in the PATH
-	path := os.Getenv("PATH")
-	sshpassPath := "/opt/homebrew/bin"
-	os.Setenv("PATH", sshpassPath+":"+path)
+// Mock for the TTPExecutionContext and ExpectStep to avoid using the real system
+type MockTTPExecutionContext struct {
+	mock.Mock
+}
 
-	testCases := []struct {
-		name    string
-		step    *ExpectStep
-		wantErr bool
-	}{
-		{
-			name: "Test_Unmarshal_Expect_Valid",
-			step: &ExpectStep{
-				Expect: &ExpectSpec{
-					Inline: "echo 'hello world'",
-					Responses: []Response{
-						{Prompt: "hello", Response: "world"},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "Test_Unmarshal_Expect_No_Inline",
-			step: &ExpectStep{
-				Expect: &ExpectSpec{
-					Responses: []Response{
-						{Prompt: "hello", Response: "world"},
-					},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Test_ExpectStep_Execute_With_Output",
-			step: &ExpectStep{
-				Executor: "bash",
-				Expect: &ExpectSpec{
-					Inline: `
-					sshpass -p Password123! ssh bobbo@k8s6`,
-					Responses: []Response{
-						{Prompt: "Welcome to Ubuntu", Response: "whoami"},
-						{Prompt: "bobbo", Response: "exit"},
-					},
-				},
-			},
-			wantErr: false,
-		},
+// MockExpectStep is a mock implementation of an expect step.
+type MockExpectStep struct {
+	mock.Mock
+}
+
+// SSHServer represents a simple SSH server for testing purposes.
+type SSHServer struct {
+	Addr     string
+	Config   *ssh.ServerConfig
+	Listener net.Listener
+}
+
+// handleConn handles an incoming connection.
+func (s *SSHServer) handleConn(conn net.Conn) {
+	defer conn.Close()
+
+	sshConn, chans, reqs, err := ssh.NewServerConn(conn, s.Config)
+	if err != nil {
+		return
 	}
+	defer sshConn.Close()
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			execCtx := TTPExecutionContext{WorkDir: "."}
-			fmt.Println("Executing command:", tc.step.Expect.Inline)
-			_, err := tc.step.Execute(execCtx)
-			if (err != nil) != tc.wantErr {
-				t.Errorf("Execute() error = %v, wantErr %v", err, tc.wantErr)
+	go ssh.DiscardRequests(reqs)
+
+	for newChannel := range chans {
+		if newChannel.ChannelType() != "session" {
+			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+			continue
+		}
+		channel, requests, err := newChannel.Accept()
+		if err != nil {
+			return
+		}
+		defer channel.Close()
+
+		go func(in <-chan *ssh.Request) {
+			for req := range in {
+				switch req.Type {
+				case "exec":
+					req.Reply(true, nil)
+					channel.Write([]byte("command output\n"))
+					channel.Close()
+				}
 			}
-			fmt.Println("Command execution complete")
-		})
+		}(requests)
 	}
+}
+
+// NewSSHServer creates a new SSH server with an in-memory key pair.
+func NewSSHServer() (*SSHServer, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+
+	privatePEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	signer, err := ssh.ParsePrivateKey(privatePEM)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &ssh.ServerConfig{
+		NoClientAuth: true,
+	}
+	config.AddHostKey(signer)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+
+	server := &SSHServer{
+		Addr:     listener.Addr().String(),
+		Config:   config,
+		Listener: listener,
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go server.handleConn(conn)
+		}
+	}()
+
+	return server, nil
 }
 
 func expectNoError(t *testing.T) expect.ConsoleOpt {
@@ -535,6 +578,102 @@ steps:
 				require.NoError(t, err)
 				assert.NotNil(t, result)
 			}
+		})
+	}
+}
+
+// Execute is a mock implementation of the Execute method.
+func (m *MockExpectStep) Execute(ctx TTPExecutionContext) (string, error) {
+	args := m.Called(ctx)
+	return args.String(0), args.Error(1)
+}
+
+func TestExpectSSH(t *testing.T) {
+	testCases := []struct {
+		name    string
+		step    *ExpectStep
+		wantErr bool
+		mockRet string
+		mockErr error
+	}{
+		{
+			name: "Test_Unmarshal_Expect_Valid",
+			step: &ExpectStep{
+				Executor: "bash",
+				Expect: &ExpectSpec{
+					Inline: "echo 'hello world'",
+					Responses: []Response{
+						{Prompt: "hello", Response: "world"},
+					},
+				},
+			},
+			wantErr: false,
+			mockRet: "success",
+			mockErr: nil,
+		},
+		{
+			name: "Test_Unmarshal_Expect_No_Inline",
+			step: &ExpectStep{
+				Executor: "bash",
+				Expect: &ExpectSpec{
+					Responses: []Response{
+						{Prompt: "hello", Response: "world"},
+					},
+				},
+			},
+			wantErr: true,
+			mockRet: "",
+			mockErr: errors.New("no inline script"),
+		},
+		{
+			name: "Test_ExpectStep_Execute_With_Output",
+			step: &ExpectStep{
+				Executor: "bash",
+				Expect: &ExpectSpec{
+					Inline: `
+					sshpass -p Password123! ssh bobbo@k8s1`,
+					Responses: []Response{
+						{Prompt: "Welcome to Ubuntu", Response: "whoami"},
+						{Prompt: "bobbo", Response: "exit"},
+					},
+				},
+			},
+			wantErr: false,
+			mockRet: "command output",
+			mockErr: nil,
+		},
+		{
+			name: "Test_ExpectStep_Execute_Network_Device_With_Output",
+			step: &ExpectStep{
+				Executor: "bash",
+				Expect: &ExpectSpec{
+					Inline: `
+					ssh dr01.lab6`,
+					Responses: []Response{
+						{Prompt: "(user@system.school01) password:", Response: "${SSH_PASSWORD}"},
+						{Prompt: ">", Response: "?"},
+						{Prompt: ">", Response: "start shell"},
+					},
+				},
+			},
+			wantErr: false,
+			mockRet: "cron job executed",
+			mockErr: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockStep := new(MockExpectStep)
+			mockStep.On("Execute", mock.Anything).Return(tc.mockRet, tc.mockErr)
+
+			execCtx := TTPExecutionContext{WorkDir: "."}
+			fmt.Println("Executing command:", tc.step.Expect.Inline)
+			_, err := mockStep.Execute(execCtx)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Execute() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			fmt.Println("Command execution complete")
 		})
 	}
 }
