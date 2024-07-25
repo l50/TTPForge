@@ -20,6 +20,7 @@ THE SOFTWARE.
 package blocks
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -177,8 +178,8 @@ steps:
 	}
 }
 
-// Mock for the TTPExecutionContext and ExpectStep to avoid using the real system
-type MockTTPExecutionContext struct {
+// Mock for the tcPExecutionContext and ExpectStep to avoid using the real system
+type MocktcPExecutionContext struct {
 	mock.Mock
 }
 
@@ -455,7 +456,7 @@ steps:
 					time.Sleep(1 * time.Second)
 					console.SendLine("30")
 					time.Sleep(1 * time.Second)
-					console.Tty().Close() // Close the TTY to signal EOF
+					console.Tty().Close() // Close the tcY to signal EOF
 				}()
 
 				_, err = expectStep.Execute(execCtx)
@@ -500,7 +501,7 @@ steps:
 					time.Sleep(1 * time.Second)
 					console.SendLine("30")
 					time.Sleep(1 * time.Second)
-					console.Tty().Close() // Close the TTY to signal EOF
+					console.Tty().Close() // Close the tcY to signal EOF
 				}()
 
 				_, err = expectStep.Execute(execCtx)
@@ -556,7 +557,7 @@ steps:
 					time.Sleep(1 * time.Second)
 					console.SendLine("30")
 					time.Sleep(1 * time.Second)
-					console.Tty().Close() // Close the TTY to signal EOF
+					console.Tty().Close() // Close the Tty to signal EOF
 				}()
 
 				_, err = expectStep.Execute(execCtx)
@@ -675,5 +676,107 @@ func TestExpectSSH(t *testing.T) {
 			}
 			fmt.Println("Command execution complete")
 		})
+	}
+}
+
+// Mocking execCommand for testing purposes
+var execCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, name, args...)
+}
+
+type MockCommandExecutor struct {
+	runFunc func() error
+}
+
+func (m MockCommandExecutor) Run() error {
+	return m.runFunc()
+}
+
+func TestCleanup(t *testing.T) {
+	testCases := []struct {
+		name          string
+		cleanupStep   string
+		mockRunOutput string
+		mockRunError  string
+		wantErr       bool
+	}{
+		{
+			name:          "No Cleanup Step",
+			cleanupStep:   "",
+			mockRunOutput: "",
+			mockRunError:  "",
+			wantErr:       false,
+		},
+		{
+			name:          "Successful Cleanup",
+			cleanupStep:   "echo 'cleaning up'",
+			mockRunOutput: "cleaning up",
+			mockRunError:  "",
+			wantErr:       false,
+		},
+		{
+			name:          "Failed Cleanup",
+			cleanupStep:   "exit 1",
+			mockRunOutput: "",
+			mockRunError:  "exit status 1",
+			wantErr:       true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &ExpectStep{
+				CleanupStep: tc.cleanupStep,
+				Executor:    "sh",
+			}
+
+			// Mock execCommand for testing
+			execCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				cs := []string{"-test.run=TestHelperProcess", "--", name}
+				cs = append(cs, args...)
+				cmd := exec.CommandContext(ctx, os.Args[0], cs...)
+				cmd.Env = append(os.Environ(),
+					"GO_WANT_HELPER_PROCESS=1",
+					fmt.Sprintf("MOCK_RUN_OUTPUT=%s", tc.mockRunOutput),
+					fmt.Sprintf("MOCK_RUN_ERROR=%s", tc.mockRunError),
+				)
+				return cmd
+			}
+
+			execCtx := TTPExecutionContext{
+				WorkDir: ".",
+			}
+
+			_, err := s.Cleanup(execCtx)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Cleanup() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestHelperProcess(*testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+
+	output := os.Getenv("MOCK_RUN_OUTPUT")
+	if output != "" {
+		fmt.Fprint(os.Stdout, output)
+	}
+
+	errorOutput := os.Getenv("MOCK_RUN_ERROR")
+	if errorOutput != "nil" {
+		fmt.Fprint(os.Stderr, errorOutput)
+		os.Exit(1)
+	}
+
+	os.Exit(0)
+}
+
+func TestCanBeUsedInCompositeAction(t *testing.T) {
+	s := &ExpectStep{}
+	if !s.CanBeUsedInCompositeAction() {
+		t.Errorf("Expected CanBeUsedInCompositeAction to return true, got false")
 	}
 }
